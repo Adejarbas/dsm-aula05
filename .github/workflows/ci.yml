@@ -39,59 +39,35 @@ jobs:
             git push origin v0.0.0
           fi
 
-      - name: Calcular nova versão
-        id: version
+
+      - name: Calcular próxima versão patch
+        id: next_version
         run: |
           git fetch --tags
-          LAST_TAG=$(git describe --tags `git rev-list --tags --max-count=1`)
-          if [ -z "$LAST_TAG" ]; then
-            LAST_TAG="v0.0.0"
-          fi
-          echo "Versão Atual: $LAST_TAG"
-          
-          if [ "$LAST_TAG" = "v0.0.0" ]; then
-            COMMITS=$(git log --pretty=format:"%s")
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          NEXT_VERSION=$(npx semver $LAST_TAG -i patch)
+          echo "NEXT_VERSION=$NEXT_VERSION" >> $GITHUB_ENV
+          echo "Última tag: $LAST_TAG"
+          echo "Próxima versão: $NEXT_VERSION"
+
+      - name: Criar e subir nova tag
+        env:
+          GH_TOKEN: ${{ secrets.AULA_TESTE_IEC }}
+        run: |
+          git fetch --tags
+          if git rev-parse "$NEXT_VERSION" >/dev/null 2>&1; then
+            echo "Tag $NEXT_VERSION já existe. Nada a fazer."
           else
-            COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"%s")
+            git config --global user.name 'github-actions'
+            git config --global user.email 'github-actions@github.com'
+            git tag -a $NEXT_VERSION -m "Release $NEXT_VERSION"
+            git push origin $NEXT_VERSION
           fi
-          
-          echo "Commits desde a última tag:"
-          echo "$COMMITS"
-          
-          # Inicializando variáveis
-          MAJOR=0
-          MINOR=0
-          PATCH=0
-          
-          # Analisando mensagens de commit
-          for COMMIT in "$COMMITS"; do
-            if [[ "$COMMIT" == *"BREAKING CHANGE"* ]]; then
-              MAJOR=1
-            elif [[ "$COMMIT" == *"feat"* ]]; then
-              MINOR=1
-            elif [[ "$COMMIT" == *"fix"* ]]; then
-              PATCH=1
-            fi
-          done
-          
-          # Calculando a nova versão usando semver
-          CURRENT_VERSION=${LAST_TAG#v}
-          NEW_VERSION=$CURRENT_VERSION
-          if [[ $MAJOR -eq 1 ]]; then
-            NEW_VERSION=$(semver -i major $CURRENT_VERSION)
-          elif [[ $MINOR -eq 1 ]]; then
-            NEW_VERSION=$(semver -i minor $CURRENT_VERSION)
-          elif [[ $PATCH -eq 1 ]]; then
-            NEW_VERSION=$(semver -i patch $CURRENT_VERSION)
-          fi
-          
-          echo "Nova versão: $NEW_VERSION"
-          echo "new_version=$NEW_VERSION" >> $GITHUB_ENV
 
       - name: Atualizar versão no package.json
         run: |
-          npm version ${{ env.new_version }} --no-git-tag-version
-          
+          npm version ${{ env.NEXT_VERSION }} --no-git-tag-version
+
       - name: Commit e push
         env:
           GH_TOKEN: ${{ secrets.AULA_TESTE_IEC }}
@@ -99,6 +75,6 @@ jobs:
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           git add package.json
-          git commit -m "chore(release): version ${{ env.new_version }}"
-          git tag v${{ env.new_version }}
+          git commit -m "chore(release): version ${{ env.NEXT_VERSION }}"
+          git tag v${{ env.NEXT_VERSION }}
           git push origin main --tags
